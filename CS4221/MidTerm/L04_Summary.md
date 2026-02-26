@@ -2,6 +2,8 @@
 
 **CS4221 - Database Tuning** | NUS Computer Science
 
+> **Relational algebra** is the mathematical foundation behind SQL. When you write a SQL query (declarative -- *what* you want), the database engine translates it into a relational algebra expression (imperative -- *how* to get it). Understanding relational algebra helps you understand how queries are optimized and why some queries run faster than others.
+
 ---
 
 ## Table of Contents
@@ -51,7 +53,7 @@ With algebra, we can find **equivalent expressions**:
 (a × b) + (a × c) ≡ a × (b + c)
 ```
 
-Executing the expression on the right may be faster. This is the basis of **query optimization** in DBMS.
+Executing the expression on the right may be faster (2 multiplications vs. 1). This is the basis of **query optimization** in DBMS -- find an equivalent expression that produces the same result but executes more efficiently.
 
 ---
 
@@ -65,7 +67,7 @@ A **relational algebra** is an algebra system for SQL queries consisting of:
 
 ### Key Properties
 
-- Unlike SQL, relational algebra is an **imperative query language** (specifies *how* to retrieve data)
+- Unlike SQL (which is **declarative** -- you say *what* you want), relational algebra is **imperative** (specifies *how* to retrieve data, step by step)
 - It forms the mathematical foundation of relational database engines
 - SQL queries are **processed** into relational algebra expressions and **evaluated**
 
@@ -135,7 +137,7 @@ Standard relational operators: **equal to** (=), **not equal to** (≠), **less/
 
 ### Definition
 
-**σ[c](R)** selects all tuples/rows **t** from the relation **R** that **satisfies the selection condition c**. In other words, c(t) is true. This is similar to a `WHERE` clause in SQL.
+**σ[c](R)** selects all tuples/rows **t** from the relation **R** that **satisfies the selection condition c**. In other words, only rows where c(t) is true are kept; all others are discarded. This is similar to a `WHERE` clause in SQL.
 
 ### Visualization
 
@@ -179,7 +181,7 @@ WHERE (c.dob >= '2010-01-01' AND c.dob <= '2010-12-31')
 
 ### Definition
 
-**π[l](R)** keeps only the columns specified in the ordered list **l** and in the same order. This is similar to `SELECT` clause in SQL, but **cannot add more columns**. Duplicate rows are **automatically deduplicated**.
+**π[l](R)** keeps only the columns specified in the ordered list **l** and in the same order. This is similar to `SELECT DISTINCT` in SQL -- it **cannot add more columns**, only keep or remove existing ones. Duplicate rows are **automatically deduplicated** (because relational algebra operates on sets, not bags).
 
 ### Visualization
 
@@ -255,7 +257,7 @@ WHERE c;                         →        ρ(rel, r)))
 | **Intersection** | R ∩ S | `SELECT * FROM R INTERSECT SELECT * FROM S` | Only rows in both R and S |
 | **Set Difference** | R − S | `SELECT * FROM R EXCEPT SELECT * FROM S` | Rows in R but not in S |
 
-**Requirement:** The two relations must be **union-compatible** (basically, they must have the same column types).
+**Requirement:** The two relations must be **union-compatible** -- they must have the same number of columns with matching types. Think of it like adding or subtracting two sets: the elements must be of the same "shape."
 
 ### Example #1: Intersection
 
@@ -376,9 +378,9 @@ The following queries are equivalent:
 σ[θ1 ∧ θ2](E)  ≡  σ[θ1](σ[θ2](E))  ≡  σ[θ2](σ[θ1](E))
 ```
 
-**Key insight:** We can **reorder** the selection operations. Additionally, we can **combine** them into a conjunction.
+**Key insight:** We can **split** a conjunction into two separate selections and **reorder** them freely. We can also **combine** them back into a single conjunction.
 
-- **Reordering:** More efficient if the inner sub-expression produces a smaller table
+- **Reordering:** More efficient if we apply the more selective filter first (the one that eliminates more rows), producing a smaller intermediate table
 - **Conjunction:** Dependent on implementation; may be more efficient than multiple selections
 
 ### Selection Distributes over Cross Product
@@ -389,9 +391,9 @@ The following queries are equivalent:
 σ[θ ∧ θ1 ∧ θ2](E1 × E2)  ≡  σ[θ](σ[θ1](E1) × σ[θ2](E2))
 ```
 
-**Condition:** Only if θ1 uses only attributes in E1 and θ2 uses only attributes in E2.
+**Condition:** Only if θ1 uses only attributes in E1 and θ2 uses only attributes in E2. (θ is the "leftover" condition that involves attributes from *both* E1 and E2, e.g., a join condition.)
 
-**Reasoning:** If the intermediate operations (σ[θ1](E1) and σ[θ2](E2)) produce smaller tables, it is more efficient to filter before the cross product.
+**Reasoning:** Cross product is expensive -- it produces |E1| × |E2| rows. If we filter E1 and E2 *before* the cross product, the intermediate tables are smaller, so the cross product produces fewer rows. This is one of the most important optimizations!
 
 **Generalizes** to multiple cross products:
 ```
@@ -425,9 +427,9 @@ The following queries are equivalent:
 π[L1](E)  ≡  π[L1](π[L2](...(π[Ln](E))))
 ```
 
-**Condition:** Only if L1 ⊆ L2 ⊆ ... ⊆ Ln. Otherwise, it may be an error.
+**Condition:** Only if L1 ⊆ L2 ⊆ ... ⊆ Ln. Each subsequent projection must keep at least the columns needed by the outermost projection. Otherwise, you'd lose columns you still need -- that's an error.
 
-**Reasoning:** The end result is the same whether we remove attribute-by-attribute or remove all unnecessary attributes at the same time.
+**Reasoning:** The end result is the same whether we remove columns gradually (step by step) or all at once. But applying projections early can reduce the width of intermediate results, saving memory and I/O.
 
 ### Projection Distributes over Union, Intersection, Difference
 

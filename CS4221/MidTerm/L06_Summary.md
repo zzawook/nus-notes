@@ -3,6 +3,8 @@
 > **CS4221 Database Tuning** | Based on L06 (annotated).pdf (50 slides)
 > Reference: *Database Tuning* by Dennis Shasha and Philippe Bonnet
 
+> This lecture covers join algorithms (Nested Loop, Hash Join, Merge Join), maintenance commands (VACUUM, ANALYZE), advanced join patterns (Semi-Join, Anti-Join), and strategies for improving query performance (denormalization, views, materialized views).
+
 ---
 
 ## Table of Contents
@@ -65,7 +67,7 @@ Result: 4 rows (Crescent Oaks, Schemedeman, Namekagon, Briar Crest)
 
 ## 2. Nested Loop Join
 
-The fundamental join algorithm: for each row in the **outer table**, scan the **inner table** for matching rows.
+The fundamental join algorithm: for each row in the **outer table**, scan the **inner table** for matching rows. It's like a nested for-loop in programming: the outer loop iterates over one table, and for each row, the inner loop searches the other table.
 
 > **Key rule**: The outer table is usually the **smallest** (w.r.t. fit into memory).
 
@@ -135,6 +137,8 @@ Nested Loop (cost=0.00..1909.85 rows=3 width=50)
 ```
 
 **Execution Time: 33.450 ms** (slow!)
+
+> Why so slow? Without materialization, the inner table (`stocks1`) is re-scanned from disk for **every** outer row. With 5 outer rows and 44,912 inner rows, that's 5 full sequential scans of the inner table.
 
 ### 2.4 With Materialized Inner Sequential Scan
 
@@ -215,8 +219,10 @@ Nested Loop
 
 ### Algorithm
 
-1. **Build phase**: Hash the **inner** (smaller) table into hash buckets
-2. **Probe phase**: Scan the **outer** table, probe hash table for matches
+1. **Build phase**: Hash the **inner** (smaller) table into hash buckets in memory
+2. **Probe phase**: Scan the **outer** (larger) table, and for each row, look up the hash table for matches
+
+> **Think of it this way:** Instead of comparing every row with every other row (like Nested Loop), Hash Join first organizes one table into a hash map, then looks up each row of the other table in O(1) time. This is much faster for large equi-joins.
 
 ### Example
 
@@ -280,7 +286,7 @@ Result: **Hash Join** (not Merge Join), even though data is ordered.
 
 ### When Is Merge Join Chosen?
 
-When a **join is followed by sorting** (ORDER BY), PostgreSQL may combine both into a Merge Join.
+When a **join is followed by sorting** (ORDER BY), PostgreSQL may combine both into a Merge Join. Since Merge Join requires sorted input anyway, and the result also needs to be sorted, it "kills two birds with one stone."
 
 ```sql
 EXPLAIN (ANALYZE) SELECT w1.w_name
@@ -341,7 +347,9 @@ VACUUM FULL warehouses2;   -- specific table, full reclaim
 
 ### Why VACUUM Is Needed: MVCC
 
-The reason for issues with **update** and **delete** is **Multiversion Concurrency Control (MVCC)**. This allows multiple transactions to read/write data simultaneously without blocking each other by maintaining **multiple versions** of the data. Dead tuples from updates/deletes accumulate and need cleanup.
+The reason for issues with **update** and **delete** is **Multiversion Concurrency Control (MVCC)**. This allows multiple transactions to read/write data simultaneously without blocking each other by maintaining **multiple versions** of the data.
+
+> **Think of it this way:** When you UPDATE a row in PostgreSQL, it doesn't modify the row in-place. Instead, it marks the old row as "dead" and creates a new row with the updated values. Similarly, DELETE just marks rows as dead. Over time, these dead rows (called "dead tuples") pile up, wasting space and slowing down scans. VACUUM cleans up these dead tuples.
 
 ### ANALYZE
 
@@ -411,7 +419,7 @@ Nested Loop Semi Join
 
 Result: **1005 rows** (all warehouses have at least one item)
 
-> Semi-Join stops scanning the inner table as soon as the **first match** is found.
+> **Key insight:** Semi-Join stops scanning the inner table as soon as the **first match** is found. It only cares about *whether* a match exists, not *how many* matches there are. This makes it more efficient than a regular join when you only need existence checking.
 
 ---
 
@@ -478,7 +486,7 @@ Filter: (NOT (hashed SubPlan 1))
     -> Seq Scan on stocks s
 ```
 
-> **PostgreSQL does not do well with `NOT IN`** - falls back to Seq Scan with hashed subplan.
+> **PostgreSQL does not do well with `NOT IN`** -- it falls back to Seq Scan with hashed subplan because `NOT IN` has tricky NULL semantics (if any value in the subquery is NULL, the entire `NOT IN` returns no rows). PostgreSQL must handle this edge case, preventing it from using the more efficient Anti Join.
 
 #### <> ALL - Does NOT produce Anti Join
 
@@ -576,16 +584,18 @@ Both produce the same execution plan with the same join order.
 
 ### Normalized Schema
 
-A **normalized schema** requires us to join tables on the **equality** of their primary and foreign keys. Joins can be **expensive**.
+A **normalized schema** requires us to join tables on the **equality** of their primary and foreign keys. Joins can be **expensive**, especially when many tables need to be joined.
 
 ### Denormalized Schema
 
-We can **denormalize** the schema by joining back some tables together.
+We can **denormalize** the schema by "joining back" some tables together -- essentially pre-computing the join and storing the result as a single table.
 
 **Trade-offs**:
 - Insertions, deletions, and updates are **more complicated** and risky (some constraints cannot be maintained)
-- They are more costly because of **manual propagation** (e.g., using triggers)
-- Some but not all queries are typically **faster** (avoid joins)
+- They are more costly because of **manual propagation** (e.g., using triggers to keep redundant data in sync)
+- Some but not all queries are typically **faster** (avoid joins at query time)
+
+> **Think of it this way:** Normalization = many small tables with no redundancy (clean writes, expensive reads). Denormalization = fewer larger tables with some redundancy (messy writes, cheap reads). Choose based on your workload.
 
 ---
 
@@ -593,17 +603,17 @@ We can **denormalize** the schema by joining back some tables together.
 
 ### Database Views
 
-- Created for **convenience only**
+- Created for **convenience only** (like saving a complex query as a shortcut)
 - Do **not change performance** from that of the underlying normalized schema
-- The `VIEW` definition is used by the optimizer as would a **subquery**
+- The `VIEW` definition is used by the optimizer as would a **subquery** -- the optimizer "inlines" the view definition and optimizes the combined query
 
 ### Materialized Views
 
-Materialized views are a **middle ground** between a normalized and a denormalized schema.
+Materialized views are a **middle ground** between a normalized and a denormalized schema. They store the result of a query physically on disk (like a cached table), but can be refreshed to stay in sync with the base tables.
 
 **Properties**:
 - Insertions, deletions, and updates are **more costly** (currently manual with triggers and refresh)
-- PostgreSQL **may not** use the materialized view definition to optimize the query
+- PostgreSQL **may not** use the materialized view definition to optimize the query (you must query the materialized view explicitly)
 - Can be **refreshed** with:
 
 ```sql
@@ -701,18 +711,20 @@ WHERE w.w_id = s.w_id AND i.i_id = s.i_id AND i.i_price < 100;
 
 ### Why Are Queries Slow?
 
-1. **Wrong design** (normalized vs denormalized)
-2. **Poor configuration** (increase `work_mem`)
-3. **Tuples are scattered**, tables and indexes are **bloated** (VACUUM, CLUSTER, VACUUM FULL, reindexing, etc.)
-4. **Missing indexes** (CREATE INDEX)
-5. **PostgreSQL does not choose the best plan** (ANALYZE)
+| # | Cause | Fix |
+|---|-------|-----|
+| 1 | **Wrong design** (normalized vs denormalized) | Redesign schema, consider denormalization or materialized views |
+| 2 | **Poor configuration** (e.g., insufficient `work_mem`) | Tune PostgreSQL configuration parameters |
+| 3 | **Tuples are scattered**, tables and indexes are **bloated** | VACUUM, CLUSTER, VACUUM FULL, reindexing |
+| 4 | **Missing indexes** | CREATE INDEX on frequently queried columns |
+| 5 | **PostgreSQL does not choose the best plan** | ANALYZE to update statistics |
 
 ### In Conclusion
 
-1. **Understand** the optimizer
+1. **Understand** the optimizer -- know how it works so you can help it
 2. **Tune the data** (normalize, denormalize, index, views, materialized) for everyone
-3. **Help the system maintain good statistics**
-4. **Hard-tune the queries as a last resort** and at every users' (current and future) risk
+3. **Help the system maintain good statistics** (ANALYZE, VACUUM)
+4. **Hard-tune the queries as a last resort** and at every users' (current and future) risk -- this is fragile and can break when data changes
 
 ---
 

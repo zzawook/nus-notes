@@ -1,7 +1,9 @@
-# L05: SQL Tuning - Study Summary
+# L05: SQL Tuning I - Study Summary
 
 > **CS4221 Database Tuning** | Based on L05 (annotated).pdf (58 slides)
 > Reference: *Database Tuning* by Dennis Shasha and Philippe Bonnet
+
+> This lecture introduces how PostgreSQL executes queries under the hood. You'll learn how to use `EXPLAIN` to see the execution plan, understand different scan types (sequential, index, bitmap), and learn how to create and use indexes to speed up queries.
 
 ---
 
@@ -101,7 +103,7 @@ PostgreSQL processes a query through four major components:
 
 ### Execution Plan
 
-An **execution plan** is a **directed acyclic graph (DAG)** or tree of **physical algebraic operators**. In PostgreSQL it includes:
+An **execution plan** is a **directed acyclic graph (DAG)** or tree of **physical algebraic operators**. Think of it as the step-by-step recipe the database follows to answer your query. In PostgreSQL it includes:
 
 - Sequential / Index Scans
 - Sorting
@@ -166,7 +168,7 @@ Aggregate  (cost=849.87..849.88 rows=1 width=8)
             Filter: ((w_country)::text = 'Indonesia'::text)
 ```
 
-**Reading the plan:** Indentation shows parent-child relationships. The `->` arrows indicate child nodes. Execution proceeds bottom-up (leaves first).
+**Reading the plan:** Indentation shows parent-child relationships. The `->` arrows indicate child nodes. Execution proceeds **bottom-up** (leaf nodes execute first, results flow up to the root). The topmost node produces the final result.
 
 ---
 
@@ -177,9 +179,9 @@ At each node of the plan, `EXPLAIN` gives **three estimates**: `cost`, `rows`, a
 ### Cost
 
 - Format: `cost=<startup>..<total>`
-- **Startup cost**: estimated cost before any output is produced
-- **Total cost**: estimated cost of executing the node (including children)
-- Expressed in **arbitrary units** (roughly proportional to estimated time)
+- **Startup cost**: estimated cost before any output is produced (e.g., time to sort before returning sorted rows)
+- **Total cost**: estimated cost of executing the node completely (including all children below it)
+- Expressed in **arbitrary units** (roughly proportional to estimated time, but NOT in seconds/milliseconds)
 - Lower costs generally indicate more efficient plans
 - Includes estimated CPU processing cost and estimated I/O cost
 - Does **NOT** include cost of transmission to the client
@@ -330,8 +332,9 @@ Returns structured JSON with fields like `Node Type`, `Strategy`, `Startup Cost`
 
 If the statistics indicate the percentage of data to retrieve is **large** or **scattered**, and if it is not possible or worth using another method, the optimizer uses a **sequential scan**.
 
-- Reads through the entire table page by page
+- Reads through the **entire table** page by page (like reading a book cover to cover)
 - PostgreSQL default page size is **8KB**
+- This is the simplest scan: no index needed, just read every page and check each row against the filter
 
 ### Example: Simple Scan
 
@@ -417,6 +420,14 @@ Unique  (cost=21.62..21.65 rows=5 width=7)
 
 Pipeline: `warehouses -> Sort -> Unique`
 
+### GROUP BY vs DISTINCT
+
+Both `GROUP BY` and `SELECT DISTINCT` can be used to get unique values. In PostgreSQL:
+- `GROUP BY` produces a **Group** node (after Sort)
+- `SELECT DISTINCT` produces a **Unique** node (after Sort)
+
+Both require sorting first. The plans look very similar.
+
 ### Distinct on Primary Key vs Non-Key
 
 - `SELECT DISTINCT w.w_name` (non-key): width=7, needs Sort + Unique
@@ -428,10 +439,11 @@ Pipeline: `warehouses -> Sort -> Unique`
 
 ### Definition
 
-An **index** is a data structure that **guides access** to the data.
+An **index** is a data structure that **guides access** to the data -- like an index at the back of a textbook that tells you which page to turn to instead of reading the whole book.
 
 - An index **may or may not speed up** queries, deletions, and updates
 - It generally **slows down insertions and updates** (since both data and index must be updated/reorganized)
+- The trade-off: faster reads vs. slower writes
 
 ### PostgreSQL Index Types
 
@@ -448,7 +460,9 @@ An **index** is a data structure that **guides access** to the data.
 
 - In PostgreSQL, indexes are **secondary** (stored **independently from the table**)
 - When searching via index: data must be fetched from **both** the index and the table (the heap)
-- Index entries meeting a condition are located near each other, but corresponding table rows can be **scattered anywhere**
+- Index entries meeting a condition are located near each other in the index, but corresponding table rows can be **scattered anywhere** on disk
+
+> **Think of it this way:** The index is like a phone book sorted by name. You can quickly find "John Smith" in the phone book, but John Smith's actual house could be anywhere in the city. You still need to travel to the house (the heap) to get the full data.
 
 ### Index-Only Scans (Covering Index)
 
@@ -529,7 +543,8 @@ If the statistics indicate the percentage of data to retrieve is **tiny** and **
 
 - Traverses the B-tree to find matching key(s)
 - Then fetches the corresponding row(s) from the table (heap)
-- **Randomly accesses** the index and table alternately
+- **Randomly accesses** the index and table alternately (index lookup -> heap fetch -> index lookup -> heap fetch -> ...)
+- Best for highly selective queries (returning very few rows)
 
 ### Example: Index Scan on Primary Key
 
@@ -564,11 +579,14 @@ After creating this index, a query on `w_city = 'Singapore'` may use a **Bitmap 
 
 ### When Used
 
-If the statistics indicate the percentage of data to retrieve is **average** and **an index is available**, a bitmap built on the index may provide **somehow direct access**. The optimizer uses a **bitmap heap scan**.
+If the statistics indicate the percentage of data to retrieve is **average** (not tiny, not huge) and **an index is available**, a bitmap built on the index may provide **somewhat direct access**. The optimizer uses a **bitmap heap scan**.
+
+> **Think of it this way:** Instead of alternating between index and heap for each row (like Index Scan), Bitmap Index Scan first builds a "map" of *which pages* contain matching rows, then reads those pages in order. This avoids random I/O when many rows match.
 
 - The bitmap is an **in-memory** data structure that encodes the pages containing the matching rows
-- You may need **AND** and **OR** operations on the bitmap (for multiple conditions)
-- In PostgreSQL: **Bitmap Index Scan** is always followed by **Bitmap Heap Scan**
+- You may need **AND** and **OR** operations on the bitmap (for combining multiple index conditions)
+- In PostgreSQL: **Bitmap Index Scan** (builds the bitmap) is always followed by **Bitmap Heap Scan** (reads the pages)
+- The **Recheck Cond** in the plan means PostgreSQL re-verifies the condition when reading the heap page (because the bitmap only tells which pages to read, not which exact rows)
 
 ### Example
 
@@ -601,8 +619,10 @@ We can **cluster the table** using an index. This **physically reorders** the ro
 CLUSTER warehouses USING warehouses_w_city;
 ```
 
-- **Must be done regularly** (if there are updates) because PostgreSQL does **not dynamically maintain** the clustered table
-- A table can only have **one cluster index**
+- **Must be done regularly** (if there are updates) because PostgreSQL does **not dynamically maintain** the clustered order -- new inserts go wherever there's space, not in sorted order
+- A table can only have **one cluster index** (you can only physically sort a table one way)
+
+> **Think of it this way:** Without clustering, rows matching a condition might be scattered across many disk pages. After clustering, those rows are stored on consecutive pages, making sequential reads much faster.
 
 ---
 
@@ -660,7 +680,7 @@ Seq Scan on stocks s  (cost=0.00..804.40 rows=88 width=2)
   Filter: (i_id = 7)
 ```
 
-**Key rule: Multicolumn index usage depends on the PREFIX of the index columns.**
+**Key rule: Multicolumn index usage depends on the PREFIX of the index columns.** Think of it like a phone book sorted by (Last Name, First Name) -- you can look up all people named "Smith" (prefix), but you can't efficiently look up all people named "John" (non-prefix) without scanning the whole book.
 
 ---
 
@@ -701,7 +721,7 @@ Again, it **depends on the prefix** of the multicolumn index.
 
 ### Tuning to Index-Only: INCLUDE Clause
 
-We can make the optimizer favor index-only scans by **including more columns** in the index.
+We can make the optimizer favor index-only scans by **including more columns** in the index. The `INCLUDE` clause adds columns to the index **without** making them part of the search key -- they're just "along for the ride" so the index can answer queries without going to the heap.
 
 ```sql
 CREATE INDEX stocks_s_qty ON stocks(s_qty) INCLUDE (w_id, i_id);

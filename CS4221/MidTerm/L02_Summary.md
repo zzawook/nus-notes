@@ -2,6 +2,8 @@
 
 **CS4221 - Database Tuning** | NUS Computer Science
 
+> The **Entity-Relationship (ER) model** is a conceptual tool for designing databases. Before writing any SQL, we first draw an ER diagram to capture **what** exists in the real world (entities), **what describes** them (attributes), and **how** they relate to each other (relationships). The ER diagram then gets translated into actual SQL tables using a systematic set of rules.
+
 ---
 
 ## Table of Contents
@@ -78,7 +80,7 @@ CREATE TABLE downloads (
 
 ### Conceptual View
 
-An entity set is like a set in mathematics -- it contains individual entity instances (e.g., individual customers), and the box in the diagram represents the entire set.
+Think of an entity set like a set in mathematics -- it contains individual entity instances (e.g., individual customers), and the box in the diagram represents the entire set. For example, the `Customers` box doesn't represent one customer; it represents the *collection of all customers*.
 
 ---
 
@@ -149,8 +151,8 @@ An entity set is like a set in mathematics -- it contains individual entity inst
 
 ### Attribute Promotion
 
-- **Problem:** In a binary relationship (Customers-Games), adding `deviceid` as a relationship attribute still doesn't allow a customer to download the same game on different devices (because relationships are identified by participating entities only)
-- **Solution:** **Promote** the attribute to a full **entity set** (e.g., create a `Devices` entity set), making it a ternary relationship
+- **Problem:** In a binary relationship (Customers-Games), adding `deviceid` as a relationship attribute still doesn't allow a customer to download the same game on different devices. Why? Because a relationship set is a **set** -- each pair of participating entities can appear at most once, regardless of different attribute values. The relationship is identified by its participating entities only, not by its attributes.
+- **Solution:** **Promote** the attribute to a full **entity set** (e.g., create a `Devices` entity set), making it a ternary relationship. Now the relationship is identified by three entities (customer, game, device), so the same customer can download the same game on different devices.
 
 ---
 
@@ -168,6 +170,8 @@ An entity set is like a set in mathematics -- it contains individual entity inst
   - No duplicate entries (same customer cannot download same game twice)
   - Identified by participating entities
 - But it **can also be used as an entity set** -- its keys can be referenced by another relationship set
+
+> **Think of it this way:** Aggregation lets you "wrap up" a relationship and treat it as a thing that other relationships can point to. For example, the act of "downloading a game" becomes an entity that can then participate in an "on (device)" relationship.
 
 ---
 
@@ -231,6 +235,8 @@ Given three alternatives for modeling "download on device":
 - Some entities can only be **identified within the scope of a relationship** with another entity set
 - **ER Diagram notation:** Connect the partial identifier to the participation of the **dominant entity** (blue filled circle on the participation line)
 
+> **Think of it this way:** A partial key is like a room number in a building. Room "101" only uniquely identifies a room *within a specific building*. If you have multiple buildings, "Room 101" alone is ambiguous -- you need to say "Room 101 in Building A." The building is the dominant entity providing the scope.
+
 **Terminology:**
 | Term | Meaning |
 |---|---|
@@ -277,7 +283,7 @@ If participation constraint is **omitted** (no min/max at all), the default is *
 
 ### Weak Entity Set Constraint
 
-Weak entities can **only** be defined with a **(1, 1)** constraint on the identifying relationship (mandatory one-to-many from dominant entity's perspective). It must be specified and no other participation is allowed.
+Weak entities must have a **(1, 1)** constraint on the identifying relationship -- this means each weak entity must belong to **exactly one** dominant entity (mandatory, one-to-one from the weak entity's side). This makes sense: if a weak entity's identity depends on a dominant entity, it must have exactly one such dominant entity to be identifiable.
 
 ### Examples
 
@@ -377,6 +383,8 @@ CREATE TABLE downloads (
 
 ### Exception #1: One-to-Many (0, 1)
 
+When an entity participates at most once in a relationship (i.e., has a **(0, 1)** constraint), the naive Rule #3 translation gives a wrong primary key.
+
 **Problem (Incorrect):** Applying Rule #3 naively with both entity keys as primary key allows an employee to work for two different companies.
 
 ```sql
@@ -406,9 +414,11 @@ CREATE TABLE work_for (
 
 ### Exception #2: Mandatory Participation (1, 1)
 
-**Problem (Incorrect):** With (1, 1) cardinality, keeping separate tables for the entity and relationship allows inserting an employee without a corresponding work_for entry, violating the minimum constraint.
+When an entity has **(1, 1)** participation (must participate exactly once), keeping entity and relationship as separate tables creates a loophole.
 
-**Correction:** **Merge** the entity table and relationship table into one.
+**Problem (Incorrect):** With (1, 1) cardinality, keeping separate tables for the entity and relationship allows inserting an employee without a corresponding work_for entry, violating the minimum constraint. There's nothing in the schema that *forces* every employee to have a row in the work_for table.
+
+**Correction:** **Merge** the entity table and relationship table into one. Now every employee row *must* contain a company reference -- the minimum constraint is enforced by the schema itself.
 
 ```sql
 -- CORRECT: Merged table ensures every employee has a company
@@ -425,9 +435,11 @@ CREATE TABLE employee_work_for (
 
 ### Exception #3: Partial Key (Weak Entity)
 
-**Problem (Incorrect):** Using only the partial key (`emp_number`) as the primary key when it's a partial key -- it should NOT uniquely identify the entity by itself.
+When the entity has a **partial key** (weak entity), its key alone is not enough to uniquely identify it -- we need the dominant entity's key too.
 
-**Correction:** **Add the primary key of the dominant entity set** to the primary key. Still merge the tables.
+**Problem (Incorrect):** Using only the partial key (`emp_number`) as the primary key when it's a partial key -- it should NOT uniquely identify the entity by itself. Two different companies could have employees with the same `emp_number`.
+
+**Correction:** **Add the primary key of the dominant entity set** to the primary key. Still merge the tables (because weak entities always have (1,1) participation on the identifying relationship, so Exception #2 also applies).
 
 ```sql
 -- CORRECT: Include dominant entity's key in PK
@@ -452,14 +464,14 @@ The translation scheme is designed to **minimize NULL values**. Any NULL values 
 
 ### Inability to Translate Certain Cardinalities
 
-The scheme (3 rules + 3 exceptions) **cannot** translate all cardinalities (e.g., (1, n)). In such cases:
+The scheme (3 rules + 3 exceptions) **cannot** translate all cardinalities. For example, **(1, n)** -- "must participate at least once, can participate many times" -- cannot be fully enforced by schema alone.
 
-**Priority of enforcement:**
-1. Ensure **identities** can uniquely identify the entity set
+**Priority of enforcement** (when you cannot enforce everything, follow this order):
+1. Ensure **identities** can uniquely identify the entity set (most important)
 2. Ensure **maximum cardinality** is satisfied
-3. Ensure **minimum cardinality** is satisfied
+3. Ensure **minimum cardinality** is satisfied (hardest to enforce in SQL)
 
-Not all constraints can be enforced purely through schema -- enforce **as much as possible**.
+Not all constraints can be enforced purely through schema -- enforce **as much as possible**. For the rest, application-level logic or triggers may be needed.
 
 ### Connection to Normalization
 

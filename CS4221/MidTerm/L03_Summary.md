@@ -2,6 +2,8 @@
 
 **CS4221 - Database Tuning** | NUS Computer Science
 
+> A **data warehouse** is a separate database optimized for *analyzing* business data, as opposed to the operational databases that handle day-to-day transactions. The key idea: **OLTP systems do the business; the data warehouse helps you understand the business.**
+
 ---
 
 ## Table of Contents
@@ -80,6 +82,8 @@
 Doing OLTP and OLAP in the **same database system** is often **impractical**:
 - An analyst's query that calculates the **sum of all sales** acquires **locks on the sales table for consistency** -- new sales transactions are **blocked**
 
+> **Think of it this way:** Imagine a librarian trying to count every book in the library while people are constantly borrowing and returning books. The librarian either blocks everyone from touching books during the count, or gets an inaccurate count. Neither is acceptable -- so we use a separate system for counting (the data warehouse).
+
 ### The Solution
 
 A dedicated **data warehouse** that:
@@ -151,6 +155,8 @@ Consider a retail **business process**. The **transactions** recorded are the **
 - Each entry in a cell is a single value (or set of values) called a **measure**
 - Other values become **dimensions**
 - The cube has three **dimensions** (product, date, store). It could be a **hypercube** with more dimensions (e.g., customers, promotions, etc.)
+
+> **Think of it this way:** Imagine a 3D spreadsheet. Each axis represents a dimension (e.g., product on the x-axis, date on the y-axis, store on the z-axis). Each cell at the intersection of these three axes contains the measure (e.g., quantity sold). With more than 3 dimensions, it becomes a hypercube that we can't physically visualize, but the concept is the same.
 
 ### Entity-Relationship Diagram
 
@@ -309,6 +315,8 @@ Kimball advocates **not to further decompose** the entity sets (i.e., no snowfla
 - Information can be **repeated in the dimensions** for simplicity and efficiency
 - **Normalization is not a concern** because data should have been **cleaned** and there is **no update**
 
+> **Think of it this way:** In an OLTP system, we normalize to avoid update anomalies. But a data warehouse is **read-only** (no updates!) -- so the main reason for normalization disappears. Keeping everything in flat dimension tables makes queries simpler and faster (fewer joins).
+
 **Example:** Even if `blkno` and `street` can uniquely identify the `area`, we do NOT decompose `store` into separate `store` and `area` tables. This decomposition is **unnecessary** because the check should have been done during ETL and there is no update in the warehouse.
 
 ---
@@ -399,7 +407,7 @@ Users can take advantage of the hierarchies defined by different fields of the d
 
 ### CUBE
 
-`CUBE` is a subclause of `GROUP BY` that defines **multiple simultaneous grouping sets**. CUBE generates **all possible** grouping sets of the input columns.
+`CUBE` is a subclause of `GROUP BY` that defines **multiple simultaneous grouping sets**. CUBE generates **all possible** grouping sets of the input columns. It answers the question: "Give me the aggregation for **every possible combination** of these dimensions."
 
 `CUBE(A,B,C)` is equivalent to the (ordered) union of the query with **no GROUP BY** (at the end) and the seven queries with:
 ```
@@ -436,7 +444,7 @@ CUBE calculates the average sales: **overall**, **by area**, **by category**, **
 
 ### ROLLUP
 
-`ROLLUP` is a subclause of `GROUP BY` that defines **multiple simultaneous grouping sets**, **considering the order of input columns**.
+`ROLLUP` is a subclause of `GROUP BY` that defines **multiple simultaneous grouping sets**, **considering the order of input columns**. It answers the question: "Give me the aggregation at **each level of this hierarchy**, from most detailed to grand total."
 
 `ROLLUP(A,B,C)` is equivalent to the (ordered) union of the query with no `GROUP BY` (at the end) and the three queries with:
 ```
@@ -445,7 +453,7 @@ GROUP BY A, B
 GROUP BY A
 ```
 
-> **Key difference from CUBE:** ROLLUP is **order-dependent** -- it only generates grouping sets that progressively drop the rightmost column. CUBE generates **all** combinations.
+> **Key difference from CUBE:** ROLLUP is **order-dependent** -- it only generates grouping sets that progressively drop the rightmost column. CUBE generates **all** combinations. So `ROLLUP(A,B,C)` gives 4 grouping sets while `CUBE(A,B,C)` gives 2^3 = 8.
 
 **Example:**
 
