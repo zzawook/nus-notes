@@ -229,17 +229,23 @@ Let *R* be a set of attributes. The following **inference rules** are the **Arms
 ```
 *Trivial functional dependencies are always valid.*
 
+**Example:** Let R = {number, name, department, position, salary}. Take X = {number, name}. Since {name} ⊆ {number, name}, by reflexivity we get {number, name} → {name}. More generally, any set of attributes always determines any of its own subsets — this is why such FDs are called "trivial".
+
 ### Augmentation
 ```
 ∀ X ⊆ R : ∀ Y ⊆ R : ∀ Z ⊆ R : ((X → Y) ⇒ ((X ∪ Z) → (Y ∪ Z)))
 ```
 *You can add the same attribute set to **both** left-hand side and right-hand side at the same time.*
 
+**Example:** Suppose we know {position} → {salary}. Let Z = {department}. By augmentation, we get {position, department} → {salary, department}. Intuitively, if knowing the position is enough to determine the salary, then knowing the position *and* the department is certainly enough to determine both the salary *and* the department.
+
 ### Transitivity
 ```
 ∀ X ⊆ R : ∀ Y ⊆ R : ∀ Z ⊆ R : ((X → Y ∧ Y → Z) ⇒ (X → Z))
 ```
 *You can "short-circuit" the arrows: if X determines Y and Y determines Z, then X determines Z.*
+
+**Example:** Suppose {number} → {position} and {position} → {salary}. By transitivity, we get {number} → {salary}. This is exactly what causes the anomaly in the employee table — salary is *transitively dependent* on number through position, which is the kind of dependency that BCNF and 3NF aim to eliminate.
 
 ### Notation
 
