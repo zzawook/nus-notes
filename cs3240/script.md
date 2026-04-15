@@ -6,7 +6,7 @@
 
 ## Open (0:00)
 
-> "Hi everyone, I'm Jay. My assigned service for PropBank is **CreatorHub** — the social layer where cosplayers post content, discover creators, and curate what inspires them. I also designed the **Settings and Profile** utility for the group. Today I'll walk through three tasks I defined, and show how the combined prototype enables each of them end to end. I'll drive everything from our shared combined file so you can see how CreatorHub connects to my teammates' services."
+> "Hi everyone, I'm Jay. My assigned service for PropBank is **CreatorHub** — the social layer where cosplayers post content, discover creators, and curate what inspires them. I also designed the **Settings and Profile** utility for the group. Today I'll walk through three tasks I defined, and show how the combined prototype enables each of them end to end."
 
 [ACTION: Start prototype in Presentation mode from **Feed** (`1738:2306`) on the "Group - Shared App" page.]
 
@@ -18,7 +18,7 @@
 
 [ACTION: Tap the **hamburger icon** at top right of Feed.]
 
-> "The sidebar is a component shared across all five services, so the pattern is consistent. Tap Settings."
+> "The sidebar is a component shared across all five services, so the pattern is consistent."
 
 [ACTION: In the sidebar, tap the **Settings** item.]
 
